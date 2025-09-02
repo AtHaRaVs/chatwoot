@@ -20,9 +20,9 @@ import { createServer } from "http";
 // IMPORTANT: Replace these with your actual Chatwoot details.
 // It's highly recommended to use environment variables for security.
 const API_ACCESS_TOKEN =
-  process.env.CHATWOOT_API_ACCESS_TOKEN || "rQSWbvgH2uQnWtWRa4YRi1eU";
+  process.env.CHATWOOT_API_ACCESS_TOKEN || "NyCuYRvkVJHHoGEhM7pXM7mu";
 const ACCOUNT_ID = process.env.CHATWOOT_ACCOUNT_ID || "133681";
-const BASE_URL = process.env.CHATWOOT_BASE_URL || "https://app.chatwoot.com"; // Use https://www.chatwoot.com if you are on a self-hosted instance
+const BASE_URL = process.env.CHATWOOT_BASE_URL || "https://app.chatwoot.com";
 
 /**
  * A helper function to send messages to the Chatwoot API.
@@ -60,7 +60,7 @@ async function postMessage(conversationId, messagePayload) {
 function sendInitialChoices(conversationId) {
   const payload = {
     content: "Welcome! How can we help you today?",
-    private: true, // This makes the message visible only to the agent until a choice is made
+    private: false, // Make this message visible to the user
     content_type: "card",
     content_attributes: {
       items: [
@@ -83,7 +83,7 @@ function sendInitialChoices(conversationId) {
  */
 function sendBidForm(conversationId) {
   const payload = {
-    private: true,
+    private: false, // Make this message visible to the user
     content_type: "form",
     content_attributes: {
       items: [
@@ -128,7 +128,7 @@ function sendBidForm(conversationId) {
  */
 function sendSalesForm(conversationId) {
   const payload = {
-    private: true,
+    private: false, // Make this message visible to the user
     content_type: "form",
     content_attributes: {
       items: [
@@ -199,18 +199,10 @@ const requestListener = function (req, res) {
         eventData.content_type === "text"
       ) {
         // Check if the message content is the payload from our buttons
-        if (
-          eventData.content === "Make a Bid" &&
-          eventData.content_attributes?.submitted_values?.[0]?.value ===
-            "ACTION_BID"
-        ) {
+        if (eventData.content === "Make a Bid") {
           console.log(`Sending bid form to conversation: ${conversationId}`);
           sendBidForm(conversationId);
-        } else if (
-          eventData.content === "Check Sales" &&
-          eventData.content_attributes?.submitted_values?.[0]?.value ===
-            "ACTION_SALES"
-        ) {
+        } else if (eventData.content === "Check Sales") {
           console.log(`Sending sales form to conversation: ${conversationId}`);
           sendSalesForm(conversationId);
         }
