@@ -31,56 +31,92 @@ async function postMessage(conversationId, messagePayload) {
   const apiUrl = `${BASE_URL}/api/v1/accounts/${ACCOUNT_ID}/conversations/${conversationId}/messages`;
 
   try {
+    console.log(
+      `Sending message to conversation ${conversationId}:`,
+      JSON.stringify(messagePayload, null, 2)
+    );
+
     const response = await fetch(apiUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        api_access_token: API_ACCESS_TOKEN,
+        Authorization: `Bearer ${API_ACCESS_TOKEN}`, // Fixed: Use Authorization header
       },
       body: JSON.stringify(messagePayload),
     });
 
+    const responseData = await response.json();
+
     if (!response.ok) {
-      const errorData = await response.json();
-      console.error(`Error sending message: ${response.statusText}`, errorData);
+      console.error(
+        `API Error (${response.status} ${response.statusText}):`,
+        responseData
+      );
+      return false;
     } else {
-      console.log("Message sent successfully.");
+      console.log("Message sent successfully:", responseData);
+      return true;
     }
   } catch (error) {
     console.error("Failed to make API request:", error);
+    return false;
   }
 }
 
 /**
- * Sends the initial choice card with "Make a Bid" and "Check Sales" buttons.
+ * Sends the initial choice buttons with "Make a Bid" and "Check Sales" options.
  * @param {number} conversationId - The ID of the conversation.
  */
-function sendInitialChoices(conversationId) {
+async function sendInitialChoices(conversationId) {
+  // Try input_select format first (more reliable)
   const payload = {
     content: "Welcome! How can we help you today?",
     private: false, // This MUST be false to be visible to the user.
-    content_type: "card",
+    content_type: "input_select",
     content_attributes: {
       items: [
-        {
-          text: "Please select an option below:",
-          actions: [
-            { type: "post_back", text: "Make a Bid", payload: "ACTION_BID" },
-            { type: "post_back", text: "Check Sales", payload: "ACTION_SALES" },
-          ],
-        },
+        { title: "Make a Bid", value: "ACTION_BID" },
+        { title: "Check Sales", value: "ACTION_SALES" },
       ],
     },
   };
-  postMessage(conversationId, payload);
+
+  const success = await postMessage(conversationId, payload);
+
+  // If input_select fails, try card format as fallback
+  if (!success) {
+    console.log("input_select failed, trying card format...");
+    const cardPayload = {
+      content: "Welcome! How can we help you today?",
+      private: false,
+      content_type: "card",
+      content_attributes: {
+        items: [
+          {
+            text: "Please select an option below:",
+            actions: [
+              { type: "post_back", text: "Make a Bid", payload: "ACTION_BID" },
+              {
+                type: "post_back",
+                text: "Check Sales",
+                payload: "ACTION_SALES",
+              },
+            ],
+          },
+        ],
+      },
+    };
+    await postMessage(conversationId, cardPayload);
+  }
 }
 
 /**
  * Sends the form for making a bid.
  * @param {number} conversationId - The ID of the conversation.
  */
-function sendBidForm(conversationId) {
+async function sendBidForm(conversationId) {
   const payload = {
+    content: "Please fill out the bid form below:",
     private: false,
     content_type: "form",
     content_attributes: {
@@ -117,15 +153,16 @@ function sendBidForm(conversationId) {
       ],
     },
   };
-  postMessage(conversationId, payload);
+  await postMessage(conversationId, payload);
 }
 
 /**
  * Sends the form for checking sales.
  * @param {number} conversationId - The ID of the conversation.
  */
-function sendSalesForm(conversationId) {
+async function sendSalesForm(conversationId) {
   const payload = {
+    content: "Please fill out the sales inquiry form below:",
     private: false,
     content_type: "form",
     content_attributes: {
@@ -155,15 +192,18 @@ function sendSalesForm(conversationId) {
       ],
     },
   };
-  postMessage(conversationId, payload);
+  await postMessage(conversationId, payload);
 }
 
 /**
  * The main handler for incoming webhook requests.
  */
 const requestListener = function (req, res) {
+  console.log(`Received ${req.method} request to ${req.url}`);
+
   if (req.method !== "POST") {
-    res.writeHead(405);
+    console.log("Method not allowed:", req.method);
+    res.writeHead(405, { "Content-Type": "text/plain" });
     res.end("Method Not Allowed");
     return;
   }
@@ -173,50 +213,109 @@ const requestListener = function (req, res) {
     body += chunk.toString();
   });
 
-  req.on("end", () => {
+  req.on("end", async () => {
     try {
+      console.log("Raw webhook body:", body);
+
+      if (!body) {
+        console.log("Empty body received");
+        res.writeHead(200);
+        res.end("OK - Empty body");
+        return;
+      }
+
       const eventData = JSON.parse(body);
+      console.log("Parsed webhook event:", JSON.stringify(eventData, null, 2));
+
       const conversationId = eventData.conversation?.id;
+      const eventType = eventData.event;
+      const messageType = eventData.message_type;
+
+      console.log(
+        `Event: ${eventType}, Message Type: ${messageType}, Conversation ID: ${conversationId}`
+      );
 
       if (!conversationId) {
+        console.log("No conversation ID found in event");
         res.writeHead(200);
         res.end("OK - No conversation ID");
         return;
       }
 
       // Event: A new chat is started by a user. This is the most reliable trigger.
-      if (eventData.event === "conversation_created") {
-        console.log(`New conversation created: ${conversationId}`);
-        sendInitialChoices(conversationId);
+      if (eventType === "conversation_created") {
+        console.log(
+          `Processing conversation_created for conversation: ${conversationId}`
+        );
+        await sendInitialChoices(conversationId);
       }
 
-      // Event: A new message is sent by the user (i.e., they clicked a button).
-      if (
-        eventData.event === "message_created" &&
-        eventData.message_type === "incoming"
-      ) {
-        // Check the submitted value from the card's payload
-        const content =
-          eventData.content_attributes?.submitted_values?.[0]?.value ||
-          eventData.content;
+      // Event: A new message is sent by the user (i.e., they clicked a button or sent a message).
+      if (eventType === "message_created" && messageType === "incoming") {
+        console.log("Processing incoming message...");
+        console.log("Message content:", eventData.content);
+        console.log(
+          "Content attributes:",
+          JSON.stringify(eventData.content_attributes, null, 2)
+        );
 
-        if (content === "ACTION_BID" || eventData.content === "Make a Bid") {
+        // Check for button payload from input_select
+        const submittedValues = eventData.content_attributes?.submitted_values;
+        let actionPayload = null;
+
+        if (submittedValues && submittedValues.length > 0) {
+          actionPayload = submittedValues[0].value;
+          console.log("Found submitted value:", actionPayload);
+        }
+
+        // Check for button payload from card actions
+        if (!actionPayload && eventData.content_attributes?.payload) {
+          actionPayload = eventData.content_attributes.payload;
+          console.log("Found payload:", actionPayload);
+        }
+
+        // Check direct message content as fallback
+        const content = eventData.content;
+
+        console.log(`Action Payload: ${actionPayload}, Content: ${content}`);
+
+        // Handle bid actions
+        if (
+          actionPayload === "ACTION_BID" ||
+          content === "Make a Bid" ||
+          content?.toLowerCase().includes("bid")
+        ) {
           console.log(`Sending bid form to conversation: ${conversationId}`);
-          sendBidForm(conversationId);
-        } else if (
-          content === "ACTION_SALES" ||
-          eventData.content === "Check Sales"
+          await sendBidForm(conversationId);
+        }
+        // Handle sales actions
+        else if (
+          actionPayload === "ACTION_SALES" ||
+          content === "Check Sales" ||
+          content?.toLowerCase().includes("sales")
         ) {
           console.log(`Sending sales form to conversation: ${conversationId}`);
-          sendSalesForm(conversationId);
+          await sendSalesForm(conversationId);
+        }
+        // Handle form submissions
+        else if (eventData.content_type === "form" && submittedValues) {
+          console.log("Form submission received:", submittedValues);
+          // You can process form submissions here if needed
+          const confirmationPayload = {
+            content:
+              "Thank you! Your form has been submitted successfully. Our team will get back to you soon.",
+            private: false,
+          };
+          await postMessage(conversationId, confirmationPayload);
         }
       }
 
-      res.writeHead(200);
+      res.writeHead(200, { "Content-Type": "text/plain" });
       res.end("OK");
     } catch (e) {
-      console.error("Error parsing JSON or processing event:", e);
-      res.writeHead(400);
+      console.error("Error processing webhook:", e);
+      console.error("Raw body that caused error:", body);
+      res.writeHead(400, { "Content-Type": "text/plain" });
       res.end("Bad Request");
     }
   });
@@ -225,8 +324,20 @@ const requestListener = function (req, res) {
 // Start the server.
 const server = createServer(requestListener);
 const port = process.env.PORT || 3000;
+
 server.listen(port, () => {
-  console.log(`Server is listening on port ${port}`);
+  console.log(`Chatwoot webhook server is listening on port ${port}`);
+  console.log(
+    `Make sure to configure your Chatwoot webhook URL to point to this server`
+  );
+  console.log(
+    `Configuration: Account ID: ${ACCOUNT_ID}, Base URL: ${BASE_URL}`
+  );
+});
+
+// Handle server errors
+server.on("error", (error) => {
+  console.error("Server error:", error);
 });
 
 // Export the server instance for serverless environments like Vercel
