@@ -1,27 +1,30 @@
 import { createServer } from "http";
 
 const server = createServer((req, res) => {
-  console.log("=== INCOMING REQUEST ===");
+  // Log EVERYTHING
+  console.log("🚨 REQUEST RECEIVED!");
   console.log("Method:", req.method);
   console.log("URL:", req.url);
-  console.log("Headers:", req.headers);
+  console.log("Time:", new Date().toISOString());
 
   let body = "";
-  req.on("data", (chunk) => (body += chunk));
+  req.on("data", (chunk) => {
+    body += chunk;
+    console.log("📦 Data chunk received");
+  });
 
   req.on("end", () => {
-    console.log("Body:", body);
-    console.log("=== END REQUEST ===");
+    console.log("📝 Complete body:", body);
+    console.log("🔥 Request processed!");
 
-    res.writeHead(200);
-    res.end("OK");
+    res.writeHead(200, { "Content-Type": "text/plain" });
+    res.end("SUCCESS - Server received the request!");
   });
 });
 
-const port = process.env.PORT || 3000;
+const port = 3000;
 server.listen(port, () => {
-  console.log(`Server running on port ${port}`);
-  console.log("Waiting for webhooks...");
+  console.log("🟢 Server is RUNNING on port", port);
+  console.log("🔗 Make sure ngrok points to this port");
+  console.log("⏳ Waiting for webhooks...");
 });
-
-export default server;
