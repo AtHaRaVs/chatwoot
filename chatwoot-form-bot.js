@@ -1,7 +1,7 @@
 import { createServer } from "http";
 
 // Configuration - Replace with your actual token
-const API_ACCESS_TOKEN = "NyCuYRvkVJHHoGEhM7pXM7mu";
+const API_ACCESS_TOKEN = "rQSWbvgH2uQnWtWRa4YRi1eU";
 const ACCOUNT_ID = "133681";
 const BASE_URL = "https://app.chatwoot.com";
 
