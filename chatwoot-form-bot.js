@@ -1,8 +1,3 @@
-/*
- * Minimal Chatwoot bot backend for Wix integration
- * Works with ngrok or serverless platforms
- */
-
 import { createServer } from "http";
 
 // --- CONFIGURATION ---
@@ -12,7 +7,7 @@ const ACCOUNT_ID = process.env.CHATWOOT_ACCOUNT_ID || "133681";
 const BASE_URL = process.env.CHATWOOT_BASE_URL || "https://app.chatwoot.com";
 
 /**
- * Helper to send messages via Chatwoot API
+ * Send a message to Chatwoot
  */
 async function postMessage(conversationId, messagePayload) {
   const apiUrl = `${BASE_URL}/api/v1/accounts/${ACCOUNT_ID}/conversations/${conversationId}/messages`;
@@ -39,7 +34,7 @@ async function postMessage(conversationId, messagePayload) {
 }
 
 /**
- * Initial choice card
+ * Send the initial choice card
  */
 function sendInitialChoices(conversationId) {
   const payload = {
@@ -62,7 +57,7 @@ function sendInitialChoices(conversationId) {
 }
 
 /**
- * Bid form
+ * Send bid form
  */
 function sendBidForm(conversationId) {
   const payload = {
@@ -106,7 +101,7 @@ function sendBidForm(conversationId) {
 }
 
 /**
- * Sales inquiry form
+ * Send sales inquiry form
  */
 function sendSalesForm(conversationId) {
   const payload = {
@@ -153,74 +148,78 @@ const requestListener = function (req, res) {
   }
 
   let body = "";
-  req.on("data", (chunk) => (body += chunk.toString()));
+  req.on("data", (chunk) => {
+    body += chunk.toString();
+  });
 
   req.on("end", () => {
     try {
       const eventData = JSON.parse(body);
 
-      // DEBUG: log full payload
-      console.log("Received webhook:", JSON.stringify(eventData, null, 2));
-
-      // Determine conversation ID (works for both conversation_created and message_created)
+      // Get conversation ID from message or conversation
       const conversationId =
-        eventData.conversation?.id ||
-        eventData.data?.id ||
-        eventData.message?.conversation_id ||
-        eventData.data?.conversation_id;
-
+        eventData.conversation?.id || eventData.message?.conversation?.id;
       if (!conversationId) {
         res.writeHead(200);
         res.end("OK - No conversation ID");
         return;
       }
 
-      // New conversation
-      if (eventData.event === "conversation_created") {
-        console.log(`New conversation created: ${conversationId}`);
-        sendInitialChoices(conversationId);
-      }
-
-      // New incoming message from user
+      // Handle message_created events
       if (
         eventData.event === "message_created" &&
-        eventData.message?.message_type === "incoming" &&
-        eventData.message?.content_type === "text"
+        eventData.message?.message_type === "incoming"
       ) {
-        const userInput = eventData.message.content;
+        const conversation = eventData.conversation;
+        const messages = conversation.messages || [];
+        const userMessage = eventData.message.content;
 
+        // If first user message, send initial choices card
+        const botMessages = messages.filter(
+          (m) =>
+            m.sender_type === "User" ||
+            m.sender_type === "Bot" ||
+            m.sender?.type === "bot"
+        );
+
+        if (messages.length === 1 || botMessages.length === 0) {
+          console.log(
+            `First user message detected, sending initial choices...`
+          );
+          sendInitialChoices(conversationId);
+        }
+
+        // Handle button responses / commands
         if (
-          userInput === "ACTION_BID" ||
-          userInput.toLowerCase() === "make a bid"
+          userMessage === "ACTION_BID" ||
+          userMessage.toLowerCase() === "make a bid"
         ) {
           console.log(`Sending bid form to conversation: ${conversationId}`);
           sendBidForm(conversationId);
         } else if (
-          userInput === "ACTION_SALES" ||
-          userInput.toLowerCase() === "check sales"
+          userMessage === "ACTION_SALES" ||
+          userMessage.toLowerCase() === "check sales"
         ) {
           console.log(`Sending sales form to conversation: ${conversationId}`);
           sendSalesForm(conversationId);
-        } else {
-          console.log(`Received user message: "${userInput}"`);
         }
       }
 
       res.writeHead(200);
       res.end("OK");
     } catch (e) {
-      console.error("Error processing webhook:", e);
+      console.error("Error parsing JSON or processing event:", e);
       res.writeHead(400);
       res.end("Bad Request");
     }
   });
 };
 
-// Start server (ngrok / serverless friendly)
+// Start server
 const server = createServer(requestListener);
 const port = process.env.PORT || 3000;
 server.listen(port, () => {
-  console.log(`Server listening on port ${port}`);
+  console.log(`Server is listening on port ${port}`);
 });
 
 export default server;
