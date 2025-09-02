@@ -1,13 +1,30 @@
+/*
+ * This is a serverless function that acts as a simple bot for Chatwoot.
+ * It listens to webhook events from Chatwoot and responds with interactive messages.
+ *
+ * How it works:
+ * 1. A user starts a new chat on your Wix site.
+ * 2. Chatwoot sends a 'conversation_created' event to this function's URL. This is the key trigger.
+ * 3. This function catches the event and sends a "card" message with two buttons: "Make a Bid" and "Check Sales".
+ * 4. The user clicks one of the buttons, which sends a message back.
+ * 5. Chatwoot sends a 'message_created' event to this function.
+ * 6. This function checks the message content and sends the appropriate form back to the user.
+ * 7. The user fills out the form, and the data is submitted directly into the Chatwoot conversation.
+ */
+
+// We are using the 'http' module to create a simple server.
 import { createServer } from "http";
 
 // --- CONFIGURATION ---
+// IMPORTANT: Use environment variables for your credentials for security.
 const API_ACCESS_TOKEN =
   process.env.CHATWOOT_API_ACCESS_TOKEN || "NyCuYRvkVJHHoGEhM7pXM7mu";
 const ACCOUNT_ID = process.env.CHATWOOT_ACCOUNT_ID || "133681";
 const BASE_URL = process.env.CHATWOOT_BASE_URL || "https://app.chatwoot.com";
-
 /**
- * Send a message to Chatwoot
+ * A helper function to send messages to the Chatwoot API.
+ * @param {number} conversationId - The ID of the conversation to send the message to.
+ * @param {object} messagePayload - The JSON payload for the message.
  */
 async function postMessage(conversationId, messagePayload) {
   const apiUrl = `${BASE_URL}/api/v1/accounts/${ACCOUNT_ID}/conversations/${conversationId}/messages`;
@@ -34,12 +51,13 @@ async function postMessage(conversationId, messagePayload) {
 }
 
 /**
- * Send the initial choice card
+ * Sends the initial choice card with "Make a Bid" and "Check Sales" buttons.
+ * @param {number} conversationId - The ID of the conversation.
  */
 function sendInitialChoices(conversationId) {
   const payload = {
     content: "Welcome! How can we help you today?",
-    private: false,
+    private: false, // This MUST be false to be visible to the user.
     content_type: "card",
     content_attributes: {
       items: [
@@ -57,7 +75,8 @@ function sendInitialChoices(conversationId) {
 }
 
 /**
- * Send bid form
+ * Sends the form for making a bid.
+ * @param {number} conversationId - The ID of the conversation.
  */
 function sendBidForm(conversationId) {
   const payload = {
@@ -101,7 +120,8 @@ function sendBidForm(conversationId) {
 }
 
 /**
- * Send sales inquiry form
+ * Sends the form for checking sales.
+ * @param {number} conversationId - The ID of the conversation.
  */
 function sendSalesForm(conversationId) {
   const payload = {
@@ -138,7 +158,7 @@ function sendSalesForm(conversationId) {
 }
 
 /**
- * Main webhook handler
+ * The main handler for incoming webhook requests.
  */
 const requestListener = function (req, res) {
   if (req.method !== "POST") {
@@ -155,53 +175,46 @@ const requestListener = function (req, res) {
   req.on("end", () => {
     try {
       const eventData = JSON.parse(body);
+      const conversationId = eventData.conversation?.id;
 
-      // Get conversation ID from message or conversation
-      const conversationId =
-        eventData.conversation?.id || eventData.message?.conversation?.id;
       if (!conversationId) {
         res.writeHead(200);
         res.end("OK - No conversation ID");
         return;
       }
 
-      // Handle message_created events
+      // Event: A new chat is started by a user. This is the most reliable trigger.
+      if (eventData.event === "conversation_created") {
+        console.log(`New conversation created: ${conversationId}`);
+        sendInitialChoices(conversationId);
+      }
+
+      // Event: A new message is sent by the user (i.e., they clicked a button).
       if (
         eventData.event === "message_created" &&
-        eventData.message?.message_type === "incoming"
+        eventData.message_type === "incoming"
       ) {
-        const conversation = eventData.conversation;
-        const messages = conversation.messages || [];
-        const userMessage = eventData.message.content;
+        // Check the submitted value from the card's payload
+        const content =
+          eventData.content_attributes?.submitted_values?.[0]?.value ||
+          eventData.content;
 
-        // If first user message, send initial choices card
-        const botMessages = messages.filter(
-          (m) =>
-            m.sender_type === "User" ||
-            m.sender_type === "Bot" ||
-            m.sender?.type === "bot"
-        );
-
-        if (messages.length === 1 || botMessages.length === 0) {
-          console.log(
-            `First user message detected, sending initial choices...`
-          );
-          sendInitialChoices(conversationId);
-        }
-
-        // Handle button responses / commands
-        if (
-          userMessage === "ACTION_BID" ||
-          userMessage.toLowerCase() === "make a bid"
-        ) {
+        if (content === "ACTION_BID" || eventData.content === "Make a Bid") {
           console.log(`Sending bid form to conversation: ${conversationId}`);
           sendBidForm(conversationId);
         } else if (
-          userMessage === "ACTION_SALES" ||
-          userMessage.toLowerCase() === "check sales"
+          content === "ACTION_SALES" ||
+          eventData.content === "Check Sales"
         ) {
           console.log(`Sending sales form to conversation: ${conversationId}`);
           sendSalesForm(conversationId);
+        } else {
+          // FALLBACK: If the user types a message that isn't a command,
+          // resend the initial choices to guide them.
+          console.log(
+            `Unrecognized message received. Sending initial choices again.`
+          );
+          sendInitialChoices(conversationId);
         }
       }
 
@@ -215,11 +228,12 @@ const requestListener = function (req, res) {
   });
 };
 
-// Start server
+// Start the server.
 const server = createServer(requestListener);
 const port = process.env.PORT || 3000;
 server.listen(port, () => {
   console.log(`Server is listening on port ${port}`);
 });
 
+// Export the server instance for serverless environments like Vercel
 export default server;
