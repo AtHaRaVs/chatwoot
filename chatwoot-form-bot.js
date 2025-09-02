@@ -1,8 +1,8 @@
 import { createServer } from "http";
 
 // Configuration - Replace with your actual token
-const API_ACCESS_TOKEN = "your_token";
-const ACCOUNT_ID = "your_id";
+const API_ACCESS_TOKEN = "NyCuYRvkVJHHoGEhM7pXM7mu";
+const ACCOUNT_ID = "133681";
 const BASE_URL = "https://app.chatwoot.com";
 
 // Helper function to send messages to Chatwoot
