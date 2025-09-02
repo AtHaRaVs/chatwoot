@@ -1,31 +1,12 @@
-/*
- * This is a serverless function that acts as a simple bot for Chatwoot.
- * It listens to webhook events from Chatwoot and responds with interactive messages.
- *
- * How it works:
- * 1. A user starts a new chat on your Wix site.
- * 2. Chatwoot sends a 'conversation_created' event to this function's URL. This is the key trigger.
- * 3. This function catches the event and sends a "card" message with two buttons: "Make a Bid" and "Check Sales".
- * 4. The user clicks one of the buttons, which sends a message back.
- * 5. Chatwoot sends a 'message_created' event to this function.
- * 6. This function checks the message content and sends the appropriate form back to the user.
- * 7. The user fills out the form, and the data is submitted directly into the Chatwoot conversation.
- */
-
-// We are using the 'http' module to create a simple server.
 import { createServer } from "http";
 
 // --- CONFIGURATION ---
-// IMPORTANT: Use environment variables for your credentials for security.
 const API_ACCESS_TOKEN =
   process.env.CHATWOOT_API_ACCESS_TOKEN || "NyCuYRvkVJHHoGEhM7pXM7mu";
 const ACCOUNT_ID = process.env.CHATWOOT_ACCOUNT_ID || "133681";
 const BASE_URL = process.env.CHATWOOT_BASE_URL || "https://app.chatwoot.com";
-/**
- * A helper function to send messages to the Chatwoot API.
- * @param {number} conversationId - The ID of the conversation to send the message to.
- * @param {object} messagePayload - The JSON payload for the message.
- */
+
+// --- HELPER: Send message to Chatwoot ---
 async function postMessage(conversationId, messagePayload) {
   const apiUrl = `${BASE_URL}/api/v1/accounts/${ACCOUNT_ID}/conversations/${conversationId}/messages`;
 
@@ -41,23 +22,22 @@ async function postMessage(conversationId, messagePayload) {
 
     if (!response.ok) {
       const errorData = await response.json();
-      console.error(`Error sending message: ${response.statusText}`, errorData);
+      console.error(`[Chatwoot API ERROR]`, response.statusText, errorData);
     } else {
-      console.log("Message sent successfully.");
+      console.log(
+        `[Chatwoot API] Message sent successfully to conversation ${conversationId}`
+      );
     }
   } catch (error) {
-    console.error("Failed to make API request:", error);
+    console.error(`[Chatwoot API] Failed request:`, error);
   }
 }
 
-/**
- * Sends the initial choice card with "Make a Bid" and "Check Sales" buttons.
- * @param {number} conversationId - The ID of the conversation.
- */
+// --- INITIAL CHOICE CARD ---
 function sendInitialChoices(conversationId) {
   const payload = {
     content: "Welcome! How can we help you today?",
-    private: false, // This MUST be false to be visible to the user.
+    private: false,
     content_type: "card",
     content_attributes: {
       items: [
@@ -74,10 +54,7 @@ function sendInitialChoices(conversationId) {
   postMessage(conversationId, payload);
 }
 
-/**
- * Sends the form for making a bid.
- * @param {number} conversationId - The ID of the conversation.
- */
+// --- BID FORM ---
 function sendBidForm(conversationId) {
   const payload = {
     private: false,
@@ -119,10 +96,7 @@ function sendBidForm(conversationId) {
   postMessage(conversationId, payload);
 }
 
-/**
- * Sends the form for checking sales.
- * @param {number} conversationId - The ID of the conversation.
- */
+// --- SALES FORM ---
 function sendSalesForm(conversationId) {
   const payload = {
     private: false,
@@ -157,9 +131,7 @@ function sendSalesForm(conversationId) {
   postMessage(conversationId, payload);
 }
 
-/**
- * The main handler for incoming webhook requests.
- */
+// --- SERVER ---
 const requestListener = function (req, res) {
   if (req.method !== "POST") {
     res.writeHead(405);
@@ -168,72 +140,67 @@ const requestListener = function (req, res) {
   }
 
   let body = "";
-  req.on("data", (chunk) => {
-    body += chunk.toString();
-  });
+  req.on("data", (chunk) => (body += chunk.toString()));
 
   req.on("end", () => {
     try {
       const eventData = JSON.parse(body);
-      const conversationId = eventData.conversation?.id;
 
+      console.log("[Webhook Received]");
+      console.log("Event type:", eventData.event);
+      console.log("Conversation ID:", eventData.conversation?.id);
+      console.log("Full payload:", JSON.stringify(eventData, null, 2));
+
+      const conversationId = eventData.conversation?.id;
       if (!conversationId) {
         res.writeHead(200);
         res.end("OK - No conversation ID");
         return;
       }
 
-      // Event: A new chat is started by a user. This is the most reliable trigger.
-      if (eventData.event === "conversation_created") {
-        console.log(`New conversation created: ${conversationId}`);
-        sendInitialChoices(conversationId);
-      }
+      // --- Determine action ---
+      let content =
+        eventData.content_attributes?.submitted_values?.[0]?.value ||
+        eventData.content;
 
-      // Event: A new message is sent by the user (i.e., they clicked a button).
+      content = content?.trim();
+
+      // If first message (or fallback), send initial choices
       if (
-        eventData.event === "message_created" &&
-        eventData.message_type === "incoming"
+        eventData.event === "conversation_created" || // if Chatwoot sends it
+        (eventData.event === "message_created" &&
+          eventData.message_type === "incoming" &&
+          !eventData.content_attributes) // user typed first message
       ) {
-        // Check the submitted value from the card's payload
-        const content =
-          eventData.content_attributes?.submitted_values?.[0]?.value ||
-          eventData.content;
-
-        if (content === "ACTION_BID" || eventData.content === "Make a Bid") {
-          console.log(`Sending bid form to conversation: ${conversationId}`);
-          sendBidForm(conversationId);
-        } else if (
-          content === "ACTION_SALES" ||
-          eventData.content === "Check Sales"
-        ) {
-          console.log(`Sending sales form to conversation: ${conversationId}`);
-          sendSalesForm(conversationId);
-        } else {
-          // FALLBACK: If the user types a message that isn't a command,
-          // resend the initial choices to guide them.
-          console.log(
-            `Unrecognized message received. Sending initial choices again.`
-          );
-          sendInitialChoices(conversationId);
-        }
+        console.log("[ACTION] Sending initial choices card.");
+        sendInitialChoices(conversationId);
+      } else if (content === "ACTION_BID" || content === "Make a Bid") {
+        console.log("[ACTION] Sending bid form.");
+        sendBidForm(conversationId);
+      } else if (content === "ACTION_SALES" || content === "Check Sales") {
+        console.log("[ACTION] Sending sales form.");
+        sendSalesForm(conversationId);
+      } else {
+        console.log(
+          "[ACTION] Unrecognized message, sending initial choices again."
+        );
+        sendInitialChoices(conversationId);
       }
 
       res.writeHead(200);
       res.end("OK");
     } catch (e) {
-      console.error("Error parsing JSON or processing event:", e);
+      console.error("[Webhook Error] Parsing or processing failed:", e);
       res.writeHead(400);
       res.end("Bad Request");
     }
   });
 };
 
-// Start the server.
 const server = createServer(requestListener);
 const port = process.env.PORT || 3000;
 server.listen(port, () => {
-  console.log(`Server is listening on port ${port}`);
+  console.log(`Server listening on port ${port}`);
 });
 
-// Export the server instance for serverless environments like Vercel
 export default server;
