@@ -25,7 +25,7 @@ async function postMessage(conversationId, messagePayload) {
       console.error(`[Chatwoot API ERROR]`, response.statusText, errorData);
     } else {
       console.log(
-        `[Chatwoot API] Message sent successfully to conversation ${conversationId}`
+        `[Chatwoot API] Message sent to conversation ${conversationId}`
       );
     }
   } catch (error) {
@@ -33,100 +33,42 @@ async function postMessage(conversationId, messagePayload) {
   }
 }
 
-// --- INITIAL CHOICE CARD ---
+// --- INITIAL CHOICE BUTTONS ---
 function sendInitialChoices(conversationId) {
   const payload = {
-    content: "Welcome! How can we help you today?",
+    content: "Welcome! How can we help you today?\nChoose an option below:",
     private: false,
-    content_type: "card",
+    content_type: "input", // Wix supports this better than 'card'
     content_attributes: {
-      items: [
-        {
-          text: "Please select an option below:",
-          actions: [
-            { type: "post_back", text: "Make a Bid", payload: "ACTION_BID" },
-            { type: "post_back", text: "Check Sales", payload: "ACTION_SALES" },
-          ],
-        },
+      actions: [
+        { type: "post_back", text: "Make a Bid", payload: "ACTION_BID" },
+        { type: "post_back", text: "Check Sales", payload: "ACTION_SALES" },
       ],
     },
   };
   postMessage(conversationId, payload);
 }
 
-// --- BID FORM ---
+// --- BID FORM (text-based) ---
 function sendBidForm(conversationId) {
   const payload = {
+    content:
+      "Please provide your bid details in this format:\n" +
+      "Full Name:\nEmail:\nItem Name/Number:\nBid Amount ($):",
     private: false,
-    content_type: "form",
-    content_attributes: {
-      items: [
-        {
-          name: "full_name",
-          label: "Full Name",
-          type: "text",
-          placeholder: "Enter your full name",
-          required: true,
-        },
-        {
-          name: "email",
-          label: "Email Address",
-          type: "text",
-          placeholder: "Enter your email",
-          required: true,
-        },
-        {
-          name: "item_name",
-          label: "Item Name/Number",
-          type: "text",
-          placeholder: "e.g., 'Vintage Watch #123'",
-          required: true,
-        },
-        {
-          name: "bid_amount",
-          label: "Bid Amount ($)",
-          type: "text",
-          placeholder: "Enter your bid amount",
-          required: true,
-        },
-        { name: "submit", type: "submit", text: "Submit Bid" },
-      ],
-    },
+    content_type: "text",
   };
   postMessage(conversationId, payload);
 }
 
-// --- SALES FORM ---
+// --- SALES FORM (text-based) ---
 function sendSalesForm(conversationId) {
   const payload = {
+    content:
+      "Please provide your inquiry in this format:\n" +
+      "Full Name:\nEmail:\nYour Question:",
     private: false,
-    content_type: "form",
-    content_attributes: {
-      items: [
-        {
-          name: "full_name",
-          label: "Full Name",
-          type: "text",
-          placeholder: "Enter your full name",
-          required: true,
-        },
-        {
-          name: "email",
-          label: "Email Address",
-          type: "text",
-          placeholder: "Enter your email",
-          required: true,
-        },
-        {
-          name: "inquiry_details",
-          label: "Your Question",
-          type: "textarea",
-          placeholder: "What can we help you find?",
-          required: true,
-        },
-        { name: "submit", type: "submit", text: "Send Inquiry" },
-      ],
-    },
+    content_type: "text",
   };
   postMessage(conversationId, payload);
 }
@@ -158,31 +100,38 @@ const requestListener = function (req, res) {
         return;
       }
 
-      // --- Determine action ---
+      // Extract content from user input
       let content =
         eventData.content_attributes?.submitted_values?.[0]?.value ||
         eventData.content;
-
       content = content?.trim();
 
-      // If first message (or fallback), send initial choices
+      // Determine action
       if (
         eventData.event === "conversation_created" || // if Chatwoot sends it
         (eventData.event === "message_created" &&
           eventData.message_type === "incoming" &&
-          !eventData.content_attributes) // user typed first message
+          !eventData.content_attributes) // first user message
       ) {
-        console.log("[ACTION] Sending initial choices card.");
+        console.log(
+          "[ACTION] Sending initial choices (Make a Bid / Check Sales)"
+        );
         sendInitialChoices(conversationId);
-      } else if (content === "ACTION_BID" || content === "Make a Bid") {
-        console.log("[ACTION] Sending bid form.");
+      } else if (
+        content === "ACTION_BID" ||
+        content?.toLowerCase() === "make a bid"
+      ) {
+        console.log("[ACTION] Sending bid form (text format)");
         sendBidForm(conversationId);
-      } else if (content === "ACTION_SALES" || content === "Check Sales") {
-        console.log("[ACTION] Sending sales form.");
+      } else if (
+        content === "ACTION_SALES" ||
+        content?.toLowerCase() === "check sales"
+      ) {
+        console.log("[ACTION] Sending sales form (text format)");
         sendSalesForm(conversationId);
       } else {
         console.log(
-          "[ACTION] Unrecognized message, sending initial choices again."
+          "[ACTION] Unrecognized message, sending initial choices again"
         );
         sendInitialChoices(conversationId);
       }
